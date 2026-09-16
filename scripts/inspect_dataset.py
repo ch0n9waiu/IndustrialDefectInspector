@@ -20,6 +20,17 @@ def main():
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset not found: {dataset_path}")
 
+    inspect_dataset_structure(dataset_path)
+    inspect_annotations(dataset_path)
+    check_image_annotation_pairs(dataset_path)
+    inspect_image_files(dataset_path)
+    analyze_class_membership(dataset_path)
+    analyze_image_statistics(dataset_path)
+
+
+def inspect_dataset_structure(dataset_path):
+    """Inspect dataset folders, image count, and file types."""
+
     image_paths = list(dataset_path.rglob("*.jpg"))
     print(f"Number of JPG images: {len(image_paths)}")
 
@@ -38,12 +49,10 @@ def main():
     for suffix, count in suffix_counter.items():
         print(f"{suffix}: {count}")
 
-    inspect_annotations(dataset_path)
-    check_image_annotation_pairs(dataset_path)
-    inspect_images(dataset_path)
-    single_class_image_counter(dataset_path)
 
 def inspect_annotations(dataset_path):
+    """Inspect XML annotations and bounding boxes."""
+
     xml_paths = list(dataset_path.rglob("*.xml"))
 
     defect_class_counter = Counter()
@@ -62,7 +71,10 @@ def inspect_annotations(dataset_path):
         xml_root = xml_tree.getroot()
 
         # 检查 XML 内部 filename
-        xml_filename = xml_root.find("filename").text
+        xml_filename = xml_root.findtext("filename")
+
+        if xml_filename is None:
+            raise ValueError(f"Missing filename in XML: {xml_path}")
 
         if xml_path.stem != Path(xml_filename).stem:
             filename_mismatches.append(xml_path.name)
@@ -122,6 +134,8 @@ def inspect_annotations(dataset_path):
 
 
 def check_image_annotation_pairs(dataset_path):
+    """Check whether every image has a matching XML annotation."""
+
     xml_paths = list(dataset_path.rglob("*.xml"))
     image_paths = list(dataset_path.rglob("*.jpg"))
 
@@ -150,7 +164,9 @@ def check_image_annotation_pairs(dataset_path):
             print(xml_stem)
 
 
-def inspect_images(dataset_path):
+def inspect_image_files(dataset_path):
+    """Check image readability and image/XML size consistency."""
+
     xml_paths = list(dataset_path.rglob("*.xml"))
     image_paths = list(dataset_path.rglob("*.jpg"))
 
@@ -161,20 +177,6 @@ def inspect_images(dataset_path):
 
     mismatch_count = 0
     read_error_count = 0
-
-    image_stems = []
-    image_means = []
-    image_stds = []
-
-    brightness_by_class = defaultdict(list)
-    contrast_by_class = defaultdict(list)
-    multi_class_image_count = 0
-    class_combination_counter = Counter()
-
-    single_brightness_by_class = defaultdict(list)
-    all_brightness_by_class = defaultdict(list)
-    single_contrast_by_class = defaultdict(list)
-
 
     for image_path in image_paths:
         image = cv2.imread(
@@ -197,7 +199,6 @@ def inspect_images(dataset_path):
         xml_tree = ET.parse(xml_path)
         xml_root = xml_tree.getroot()
 
-        # Image/XML 尺寸检查
         xml_size = xml_root.find("size")
 
         width = int(xml_size.find("width").text)
@@ -211,15 +212,24 @@ def inspect_images(dataset_path):
                 f"Image=({image_width}, {image_height})"
             )
 
-        # 当前图片的图像统计
-        brightness = image.mean()
-        contrast = image.std()
+    print("\nImage file inspection:")
+    print(f"Image read errors: {read_error_count}")
+    print(f"Image/XML size mismatches: {mismatch_count}")
 
-        image_stems.append(image_path.stem)
-        image_means.append(brightness)
-        image_stds.append(contrast)
 
-        # 当前图片包含的类别
+def analyze_class_membership(dataset_path):
+    """Analyze single-class, multi-class, and class co-occurrence images."""
+
+    xml_paths = list(dataset_path.rglob("*.xml"))
+
+    multi_class_image_count = 0
+    class_combination_counter = Counter()
+    single_class_image_counter = Counter()
+
+    for xml_path in xml_paths:
+        xml_tree = ET.parse(xml_path)
+        xml_root = xml_tree.getroot()
+
         xml_objects = xml_root.findall("object")
 
         image_classes = set()
@@ -228,20 +238,94 @@ def inspect_images(dataset_path):
             class_name = xml_object.find("name").text
             image_classes.add(class_name)
 
-        # 按 image-level 统计类别亮度和对比度
-        for class_name in image_classes:
-            brightness_by_class[class_name].append(brightness)
-            contrast_by_class[class_name].append(contrast)
-
         if len(image_classes) > 1:
             multi_class_image_count += 1
             class_combination_counter[frozenset(image_classes)] += 1
 
         if len(image_classes) == 1:
             class_name = next(iter(image_classes))
+            single_class_image_counter[class_name] += 1
+
+    print("\nClass membership analysis:")
+    print(f"同一张图包含多个类别的图片共: {multi_class_image_count}")
+
+    print("组合分别是:")
+
+    for class_comb, count in class_combination_counter.most_common():
+        print(f"{sorted(class_comb)}: {count}")
+
+    print("\nSingle-class images:")
+
+    for class_name, count in single_class_image_counter.most_common():
+        print(f"{class_name}: {count}")
+
+
+def analyze_image_statistics(dataset_path):
+    """Analyze image brightness and contrast statistics."""
+
+    xml_paths = list(dataset_path.rglob("*.xml"))
+    image_paths = list(dataset_path.rglob("*.jpg"))
+
+    xml_map = {
+        xml_path.stem: xml_path
+        for xml_path in xml_paths
+    }
+
+    image_stems = []
+    image_means = []
+    image_stds = []
+
+    brightness_by_class = defaultdict(list)
+    contrast_by_class = defaultdict(list)
+
+    single_brightness_by_class = defaultdict(list)
+    single_contrast_by_class = defaultdict(list)
+
+    for image_path in image_paths:
+        image = cv2.imread(
+            str(image_path),
+            cv2.IMREAD_GRAYSCALE
+        )
+
+        if image is None:
+            continue
+
+        xml_path = xml_map.get(image_path.stem)
+
+        if xml_path is None:
+            continue
+
+        xml_tree = ET.parse(xml_path)
+        xml_root = xml_tree.getroot()
+
+        brightness = image.mean()
+        contrast = image.std()
+
+        image_stems.append(image_path.stem)
+        image_means.append(brightness)
+        image_stds.append(contrast)
+
+        xml_objects = xml_root.findall("object")
+
+        image_classes = set()
+
+        for xml_object in xml_objects:
+            class_name = xml_object.find("name").text
+            image_classes.add(class_name)
+
+        # 所有包含该类别的图片
+        for class_name in image_classes:
+            brightness_by_class[class_name].append(brightness)
+            contrast_by_class[class_name].append(contrast)
+
+        # 纯单类别图片
+        if len(image_classes) == 1:
+            class_name = next(iter(image_classes))
 
             single_brightness_by_class[class_name].append(brightness)
             single_contrast_by_class[class_name].append(contrast)
+
+    print("\nAll images vs single-class brightness:")
 
     for class_name in sorted(single_brightness_by_class):
         print(f"{class_name}:")
@@ -253,11 +337,6 @@ def inspect_images(dataset_path):
             f"  single-class brightness mean: "
             f"{np.mean(single_brightness_by_class[class_name]):.2f}"
         )
-
-    print(f"同一张图包含多个类别的图片共: {multi_class_image_count}")
-    print(f"组合分别是: ")
-    for class_comb, count in class_combination_counter.most_common():
-        print(f"{sorted(class_comb)}: {count}")
 
     print("\nImage statistics by class:")
 
@@ -298,32 +377,6 @@ def inspect_images(dataset_path):
         f"{image_stems[image_stds.index(max(image_stds))]} "
         f"({max(image_stds):.2f})"
     )
-
-    print(f"Image read errors: {read_error_count}")
-    print(f"Image/XML size mismatches: {mismatch_count}")
-
-def single_class_image_counter(dataset_path):
-    xml_paths = list(dataset_path.rglob("*.xml"))
-    number_of_each_class = Counter()
-    for xml_path in xml_paths:
-
-        xml_tree = ET.parse(xml_path)
-        xml_root = xml_tree.getroot()
-        xml_objects = xml_root.findall("object")
-
-        image_classes = set()
-
-        for xml_object in xml_objects:
-            class_name = xml_object.find("name").text
-            image_classes.add(class_name)
-
-        if len(image_classes) == 1:
-            class_name = next(iter(image_classes))
-            number_of_each_class[class_name] += 1
-
-    for class_name,count in number_of_each_class.most_common():
-        print(f"{class_name}: {count}")
-
 
 
 if __name__ == "__main__":
