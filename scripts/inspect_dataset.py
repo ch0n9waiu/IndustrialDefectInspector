@@ -2,10 +2,12 @@
 
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
+from collections.abc import dict_valueiterator
 from pathlib import Path
 
 import cv2
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 def main():
@@ -20,12 +22,13 @@ def main():
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset not found: {dataset_path}")
 
-    inspect_dataset_structure(dataset_path)
-    inspect_annotations(dataset_path)
-    check_image_annotation_pairs(dataset_path)
-    inspect_image_files(dataset_path)
-    analyze_class_membership(dataset_path)
-    analyze_image_statistics(dataset_path)
+    # inspect_dataset_structure(dataset_path)
+    # inspect_annotations(dataset_path)
+    # check_image_annotation_pairs(dataset_path)
+    # inspect_image_files(dataset_path)
+    # analyze_class_membership(dataset_path)
+    single_brightness_by_class, single_contrast_by_class = analyze_image_statistics(dataset_path)
+    plot_brightness_contrast_distribution(single_brightness_by_class, single_contrast_by_class, "contrast")
 
 
 def inspect_dataset_structure(dataset_path):
@@ -340,8 +343,6 @@ def analyze_image_statistics(dataset_path):
         multi_brightness_values = multi_brightness_by_class[class_name]
         multi_contrast_values = multi_contrast_by_class[class_name]
 
-
-
         print(f"{class_name}:")
         print(
             f"  all images brightness mean: "
@@ -351,7 +352,6 @@ def analyze_image_statistics(dataset_path):
             f"  single-class brightness mean: "
             f"{np.mean(single_brightness_by_class[class_name]):.2f}"
         )
-
 
         print(
             f"  all images contrast mean: "
@@ -414,6 +414,35 @@ def analyze_image_statistics(dataset_path):
         f"{image_stems[image_stds.index(max(image_stds))]} "
         f"({max(image_stds):.2f})"
     )
+    return single_brightness_by_class, single_contrast_by_class
+
+
+def plot_brightness_contrast_distribution(single_brightness_by_class, single_contrast_by_class, metric_name):
+    if metric_name == "brightness":
+        dict_values = single_brightness_by_class
+        plt.ylabel("Mean brightness (gray level)")
+        plt.title("Single-class Image Brightness Distribution")
+    elif metric_name == "contrast":
+        dict_values = single_contrast_by_class
+        plt.ylabel("Image contrast (std of gray level)")
+        plt.title("Single-class Image Contrast Distribution")
+    else:
+        raise ValueError(f"Unknown metric: {metric_name}")
+    defect_classes_list = sorted(dict_values)
+
+    defect_values_list = [
+        dict_values[class_name]
+        for class_name in defect_classes_list
+    ]
+
+    plt.boxplot(
+        defect_values_list,
+        tick_labels=defect_classes_list,
+    )
+    plt.xlabel("Defect class")
+
+    plt.xticks(rotation=30)
+    plt.show()
 
 
 if __name__ == "__main__":
