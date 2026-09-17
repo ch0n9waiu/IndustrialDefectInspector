@@ -280,6 +280,8 @@ def analyze_image_statistics(dataset_path):
 
     single_brightness_by_class = defaultdict(list)
     single_contrast_by_class = defaultdict(list)
+    multi_brightness_by_class = defaultdict(list)
+    multi_contrast_by_class = defaultdict(list)
 
     for image_path in image_paths:
         image = cv2.imread(
@@ -324,10 +326,22 @@ def analyze_image_statistics(dataset_path):
 
             single_brightness_by_class[class_name].append(brightness)
             single_contrast_by_class[class_name].append(contrast)
+        else:
+            for class_name in image_classes:
+                multi_brightness_by_class[class_name].append(brightness)
+                multi_contrast_by_class[class_name].append(contrast)
 
-    print("\nAll images vs single-class brightness:")
+    print(
+        "\nAll vs single-class vs multi-class "
+        "brightness and contrast statistics:"
+    )
 
     for class_name in sorted(single_brightness_by_class):
+        multi_brightness_values = multi_brightness_by_class[class_name]
+        multi_contrast_values = multi_contrast_by_class[class_name]
+
+
+
         print(f"{class_name}:")
         print(
             f"  all images brightness mean: "
@@ -338,6 +352,29 @@ def analyze_image_statistics(dataset_path):
             f"{np.mean(single_brightness_by_class[class_name]):.2f}"
         )
 
+
+        print(
+            f"  all images contrast mean: "
+            f"{np.mean(contrast_by_class[class_name]):.2f}"
+        )
+        print(
+            f"  single-class contrast mean: "
+            f"{np.mean(single_contrast_by_class[class_name]):.2f}"
+        )
+
+        if multi_brightness_values:
+            print(
+                f"  multi-class brightness mean: "
+                f"{np.mean(multi_brightness_values):.2f}"
+            )
+            print(
+                f"  multi-class contrast mean: "
+                f"{np.mean(multi_contrast_values):.2f}"
+            )
+        else:
+            print("  multi-class brightness mean: N/A")
+            print("  multi-class contrast mean: N/A")
+        print(f"  multi-class images: {len(multi_brightness_by_class[class_name])}")
     print("\nImage statistics by class:")
 
     for class_name in sorted(brightness_by_class):
