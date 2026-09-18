@@ -2,7 +2,6 @@
 
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
-from collections.abc import dict_valueiterator
 from pathlib import Path
 
 import cv2
@@ -28,7 +27,7 @@ def main():
     # inspect_image_files(dataset_path)
     # analyze_class_membership(dataset_path)
     single_brightness_by_class, single_contrast_by_class = analyze_image_statistics(dataset_path)
-    plot_brightness_contrast_distribution(single_brightness_by_class, single_contrast_by_class, "contrast")
+    plot_brightness_contrast_distribution(single_brightness_by_class, single_contrast_by_class, "brightness")
 
 
 def inspect_dataset_structure(dataset_path):
