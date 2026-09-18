@@ -26,8 +26,25 @@ def main():
     # check_image_annotation_pairs(dataset_path)
     # inspect_image_files(dataset_path)
     # analyze_class_membership(dataset_path)
-    single_brightness_by_class, single_contrast_by_class = analyze_image_statistics(dataset_path)
-    plot_brightness_contrast_distribution(single_brightness_by_class, single_contrast_by_class, "brightness")
+    # single_brightness_by_class, single_contrast_by_class = analyze_image_statistics(dataset_path)
+    # plot_brightness_contrast_distribution(single_brightness_by_class, single_contrast_by_class, "brightness")
+    # visualize_annotation(dataset_path)
+    (
+        roi_brightness_delta_by_class,
+        roi_contrast_delta_by_class
+    ) = analyze_roi_statistics(dataset_path)
+
+    plot_roi_delta_distribution(
+        roi_brightness_delta_by_class,
+        roi_contrast_delta_by_class,
+        "brightness"
+    )
+
+    plot_roi_delta_distribution(
+        roi_brightness_delta_by_class,
+        roi_contrast_delta_by_class,
+        "contrast"
+    )
 
 
 def inspect_dataset_structure(dataset_path):
@@ -68,6 +85,10 @@ def inspect_annotations(dataset_path):
 
     filename_mismatches = []
 
+    min_xmin = float("inf")
+    min_ymin = float("inf")
+    max_xmax = 0
+    max_ymax = 0
     for xml_path in xml_paths:
         xml_tree = ET.parse(xml_path)
         xml_root = xml_tree.getroot()
@@ -98,6 +119,11 @@ def inspect_annotations(dataset_path):
             ymin = int(bbox.find("ymin").text)
             xmax = int(bbox.find("xmax").text)
             ymax = int(bbox.find("ymax").text)
+
+            min_xmin = min(min_xmin, xmin)
+            min_ymin = min(min_ymin, ymin)
+            max_xmax = max(max_xmax, xmax)
+            max_ymax = max(max_ymax, ymax)
 
             if xmin >= xmax or ymin >= ymax:
                 invalid_box_count += 1
@@ -133,6 +159,11 @@ def inspect_annotations(dataset_path):
     if filename_mismatches:
         for filename in filename_mismatches:
             print(f"Filename mismatch: {filename}")
+
+    print("Minimum xmin:", min_xmin)
+    print("Minimum ymin:", min_ymin)
+    print("Maximum xmax:", max_xmax)
+    print("Maximum ymax:", max_ymax)
 
 
 def check_image_annotation_pairs(dataset_path):
@@ -444,5 +475,228 @@ def plot_brightness_contrast_distribution(single_brightness_by_class, single_con
     plt.show()
 
 
+def visualize_annotation(dataset_path):
+    xml_path = next((dataset_path / "ANNOTATIONS").glob("*.xml"))
+
+    image_path = dataset_path / "IMAGES" / f"{xml_path.stem}.jpg"
+
+    image = cv2.imread(str(image_path))
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    if image is None:
+        raise ValueError(f"Failed to read image: {image_path}")
+
+    xml_tree = ET.parse(xml_path)
+    xml_root = xml_tree.getroot()
+
+    for obj in xml_root.findall("object"):
+        class_name = obj.find("name").text
+
+        bbox = obj.find("bndbox")
+
+        xmin = int(bbox.find("xmin").text)
+        ymin = int(bbox.find("ymin").text)
+        xmax = int(bbox.find("xmax").text)
+        ymax = int(bbox.find("ymax").text)
+
+        roi = gray_image[ymin:ymax, xmin:xmax]
+
+        roi_brightness = roi.mean()
+        roi_contrast = roi.std()
+
+        print(
+            f"{class_name}: "
+            f"brightness={roi_brightness:.2f}, "
+            f"contrast={roi_contrast:.2f}, "
+            f"shape={roi.shape}"
+        )
+
+        print(
+            class_name,
+            "bbox:",
+            xmin, ymin, xmax, ymax,
+            "roi shape:",
+            roi.shape
+        )
+
+        cv2.rectangle(
+            image,
+            (xmin, ymin),
+            (xmax, ymax),
+            (0, 255, 0),
+            2
+        )
+    whole_brightness = gray_image.mean()
+    whole_contrast = gray_image.std()
+
+    print(
+        f"Whole image: "
+        f"brightness={whole_brightness:.2f}, "
+        f"contrast={whole_contrast:.2f}"
+    )
+
+    plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    plt.axis("off")
+    plt.show()
+
+
+def analyze_roi_statistics(dataset_path):
+    xml_paths = (dataset_path / "ANNOTATIONS").glob("*.xml")
+
+    image_map = {
+        path.stem: path
+        for path in (dataset_path / "IMAGES").glob("*.jpg")
+    }
+
+    roi_brightness_by_class = defaultdict(list)
+    roi_contrast_by_class = defaultdict(list)
+
+    roi_brightness_delta_by_class = defaultdict(list)
+    roi_contrast_delta_by_class = defaultdict(list)
+
+    for xml_path in xml_paths:
+        image_path = image_map[xml_path.stem]
+
+        gray_image = cv2.imread(
+            str(image_path),
+            cv2.IMREAD_GRAYSCALE
+        )
+
+        if gray_image is None:
+            raise ValueError(f"Failed to read image: {image_path}")
+
+        # 一张图只计算一次
+        whole_brightness = gray_image.mean()
+        whole_contrast = gray_image.std()
+
+        xml_tree = ET.parse(xml_path)
+        xml_root = xml_tree.getroot()
+
+        for obj in xml_root.findall("object"):
+            class_name = obj.find("name").text
+
+            bbox = obj.find("bndbox")
+
+            xmin = int(bbox.find("xmin").text)
+            ymin = int(bbox.find("ymin").text)
+            xmax = int(bbox.find("xmax").text)
+            ymax = int(bbox.find("ymax").text)
+
+            # VOC 1-based inclusive → NumPy slicing
+            roi = gray_image[
+                ymin - 1:ymax,
+                xmin - 1:xmax
+            ]
+
+            # 一个 ROI 也只计算一次
+            roi_brightness = roi.mean()
+            roi_contrast = roi.std()
+
+            roi_brightness_by_class[class_name].append(
+                roi_brightness
+            )
+            roi_contrast_by_class[class_name].append(
+                roi_contrast
+            )
+
+            brightness_delta = (
+                roi_brightness - whole_brightness
+            )
+            contrast_delta = (
+                roi_contrast - whole_contrast
+            )
+
+            roi_brightness_delta_by_class[class_name].append(
+                brightness_delta
+            )
+            roi_contrast_delta_by_class[class_name].append(
+                contrast_delta
+            )
+
+    print("\nROI statistics by class:")
+
+    for class_name in sorted(roi_brightness_by_class):
+        brightness_values = roi_brightness_by_class[class_name]
+        contrast_values = roi_contrast_by_class[class_name]
+
+        brightness_delta_values = (
+            roi_brightness_delta_by_class[class_name]
+        )
+        contrast_delta_values = (
+            roi_contrast_delta_by_class[class_name]
+        )
+
+        print(class_name)
+        print(f"  objects: {len(brightness_values)}")
+        print(
+            f"  ROI brightness mean: "
+            f"{np.mean(brightness_values):.2f}"
+        )
+        print(
+            f"  ROI contrast mean: "
+            f"{np.mean(contrast_values):.2f}"
+        )
+        print(
+            f"  ROI brightness delta mean: "
+            f"{np.mean(brightness_delta_values):.2f}"
+        )
+        print(
+            f"  ROI contrast delta mean: "
+            f"{np.mean(contrast_delta_values):.2f}"
+        )
+
+    total_rois = sum(
+        len(values)
+        for values in roi_brightness_by_class.values()
+    )
+
+    print(f"Total ROIs: {total_rois}")
+
+    return (
+        roi_brightness_delta_by_class,
+        roi_contrast_delta_by_class
+    )
+
+def plot_roi_delta_distribution(
+    roi_brightness_delta_by_class,
+    roi_contrast_delta_by_class,
+    metric_name
+):
+    if metric_name == "brightness":
+        values_by_class = roi_brightness_delta_by_class
+        ylabel = "ROI - whole image brightness"
+        title = "ROI Brightness Delta by Defect Class"
+
+    elif metric_name == "contrast":
+        values_by_class = roi_contrast_delta_by_class
+        ylabel = "ROI - whole image contrast"
+        title = "ROI Contrast Delta by Defect Class"
+
+    else:
+        raise ValueError(f"Unknown metric: {metric_name}")
+
+    class_names = sorted(values_by_class)
+
+    values_list = [
+        values_by_class[class_name]
+        for class_name in class_names
+    ]
+
+    plt.boxplot(
+        values_list,
+        tick_labels=class_names
+    )
+
+    plt.axhline(
+        0,
+        linestyle="--"
+    )
+
+    plt.xlabel("Defect class")
+    plt.ylabel(ylabel)
+    plt.title(title)
+
+    plt.xticks(rotation=30)
+    plt.show()
 if __name__ == "__main__":
     main()
