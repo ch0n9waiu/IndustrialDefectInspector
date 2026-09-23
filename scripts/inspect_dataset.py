@@ -27,8 +27,6 @@ def main():
     check_image_annotation_pairs(dataset_path)
     inspect_image_files(dataset_path)
     analyze_class_membership(dataset_path)
-    analyze_image_statistics(dataset_path)
-    analyze_roi_statistics(dataset_path)
 
     single_brightness_by_class, single_contrast_by_class = (
         analyze_image_statistics(dataset_path)
