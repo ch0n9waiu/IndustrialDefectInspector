@@ -3,3 +3,5 @@ models/
 outputs/
 .venv/
 .idea/
+# Local private project context
+PROJECT_CONTEXT.md
