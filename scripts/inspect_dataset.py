@@ -1,12 +1,12 @@
-"""Inspect the structure, annotations, and image statistics of the NEU-DET dataset."""
+"""Inspect the structure, annotations, image statistics, and ROI statistics of NEU-DET."""
 
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from pathlib import Path
 
 import cv2
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def main():
@@ -21,14 +21,31 @@ def main():
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset not found: {dataset_path}")
 
-    # inspect_dataset_structure(dataset_path)
-    # inspect_annotations(dataset_path)
-    # check_image_annotation_pairs(dataset_path)
-    # inspect_image_files(dataset_path)
-    # analyze_class_membership(dataset_path)
-    # single_brightness_by_class, single_contrast_by_class = analyze_image_statistics(dataset_path)
-    # plot_brightness_contrast_distribution(single_brightness_by_class, single_contrast_by_class, "brightness")
-    # visualize_annotation(dataset_path)
+    # Run the complete non-interactive Phase 1 inspection by default.
+    inspect_dataset_structure(dataset_path)
+    inspect_annotations(dataset_path)
+    check_image_annotation_pairs(dataset_path)
+    inspect_image_files(dataset_path)
+    analyze_class_membership(dataset_path)
+    analyze_image_statistics(dataset_path)
+    analyze_roi_statistics(dataset_path)
+
+    single_brightness_by_class, single_contrast_by_class = (
+        analyze_image_statistics(dataset_path)
+    )
+
+    plot_brightness_contrast_distribution(
+        single_brightness_by_class,
+        single_contrast_by_class,
+        "brightness"
+    )
+
+    plot_brightness_contrast_distribution(
+        single_brightness_by_class,
+        single_contrast_by_class,
+        "contrast"
+    )
+
     (
         roi_brightness_delta_by_class,
         roi_contrast_delta_by_class
@@ -93,7 +110,7 @@ def inspect_annotations(dataset_path):
         xml_tree = ET.parse(xml_path)
         xml_root = xml_tree.getroot()
 
-        # 检查 XML 内部 filename
+        # Validate the filename stored inside the XML
         xml_filename = xml_root.findtext("filename")
 
         if xml_filename is None:
@@ -102,7 +119,7 @@ def inspect_annotations(dataset_path):
         if xml_path.stem != Path(xml_filename).stem:
             filename_mismatches.append(xml_path.name)
 
-        # object 和 bbox 检查
+        # Validate objects and bounding boxes
         xml_objects = xml_root.findall("object")
 
         xml_size = xml_root.find("size")
@@ -125,11 +142,11 @@ def inspect_annotations(dataset_path):
             max_xmax = max(max_xmax, xmax)
             max_ymax = max(max_ymax, ymax)
 
-            if xmin >= xmax or ymin >= ymax:
+            if xmin > xmax or ymin > ymax:
                 invalid_box_count += 1
                 print(f"Invalid bbox: {xml_path.name}")
 
-            if xmin < 0 or ymin < 0 or xmax > width or ymax > height:
+            if xmin < 1 or ymin < 1 or xmax > width or ymax > height:
                 out_of_bounds_count += 1
                 print(f"Out-of-bounds bbox: {xml_path.name}")
 
@@ -280,9 +297,9 @@ def analyze_class_membership(dataset_path):
             single_class_image_counter[class_name] += 1
 
     print("\nClass membership analysis:")
-    print(f"同一张图包含多个类别的图片共: {multi_class_image_count}")
+    print(f"Multi-class images: {multi_class_image_count}")
 
-    print("组合分别是:")
+    print("Class co-occurrence combinations:")
 
     for class_comb, count in class_combination_counter.most_common():
         print(f"{sorted(class_comb)}: {count}")
@@ -348,12 +365,12 @@ def analyze_image_statistics(dataset_path):
             class_name = xml_object.find("name").text
             image_classes.add(class_name)
 
-        # 所有包含该类别的图片
+        # All images containing the current class
         for class_name in image_classes:
             brightness_by_class[class_name].append(brightness)
             contrast_by_class[class_name].append(contrast)
 
-        # 纯单类别图片
+        # Pure single-class images
         if len(image_classes) == 1:
             class_name = next(iter(image_classes))
 
@@ -422,32 +439,40 @@ def analyze_image_statistics(dataset_path):
         print(f"  contrast mean: {contrast_mean:.2f}")
 
     print(
-        f"\n最低平均亮度图片: "
+        f"\nLowest mean-brightness image: "
         f"{image_stems[image_means.index(min(image_means))]} "
         f"({min(image_means):.2f})"
     )
 
     print(
-        f"最高平均亮度图片: "
+        f"Highest mean-brightness image: "
         f"{image_stems[image_means.index(max(image_means))]} "
         f"({max(image_means):.2f})"
     )
 
     print(
-        f"最低对比度图片: "
+        f"Lowest-contrast image: "
         f"{image_stems[image_stds.index(min(image_stds))]} "
         f"({min(image_stds):.2f})"
     )
 
     print(
-        f"最高对比度图片: "
+        f"Highest-contrast image: "
         f"{image_stems[image_stds.index(max(image_stds))]} "
         f"({max(image_stds):.2f})"
     )
     return single_brightness_by_class, single_contrast_by_class
 
 
-def plot_brightness_contrast_distribution(single_brightness_by_class, single_contrast_by_class, metric_name):
+def plot_brightness_contrast_distribution(
+    single_brightness_by_class,
+    single_contrast_by_class,
+    metric_name
+):
+    """Plot single-class brightness or contrast distributions."""
+
+    plt.figure(figsize=(10, 6))
+
     if metric_name == "brightness":
         dict_values = single_brightness_by_class
         plt.ylabel("Mean brightness (gray level)")
@@ -472,19 +497,23 @@ def plot_brightness_contrast_distribution(single_brightness_by_class, single_con
     plt.xlabel("Defect class")
 
     plt.xticks(rotation=30)
+    plt.tight_layout()
     plt.show()
 
 
 def visualize_annotation(dataset_path):
+    """Visualize one annotation file and report its ROI statistics."""
+
     xml_path = next((dataset_path / "ANNOTATIONS").glob("*.xml"))
 
     image_path = dataset_path / "IMAGES" / f"{xml_path.stem}.jpg"
 
     image = cv2.imread(str(image_path))
-    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     if image is None:
         raise ValueError(f"Failed to read image: {image_path}")
+
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     xml_tree = ET.parse(xml_path)
     xml_root = xml_tree.getroot()
@@ -499,7 +528,8 @@ def visualize_annotation(dataset_path):
         xmax = int(bbox.find("xmax").text)
         ymax = int(bbox.find("ymax").text)
 
-        roi = gray_image[ymin:ymax, xmin:xmax]
+        # VOC 1-based inclusive -> NumPy 0-based slicing
+        roi = gray_image[ymin - 1:ymax, xmin - 1:xmax]
 
         roi_brightness = roi.mean()
         roi_contrast = roi.std()
@@ -521,8 +551,8 @@ def visualize_annotation(dataset_path):
 
         cv2.rectangle(
             image,
-            (xmin, ymin),
-            (xmax, ymax),
+            (xmin - 1, ymin - 1),
+            (xmax - 1, ymax - 1),
             (0, 255, 0),
             2
         )
@@ -535,12 +565,16 @@ def visualize_annotation(dataset_path):
         f"contrast={whole_contrast:.2f}"
     )
 
+    plt.figure(figsize=(8, 8))
     plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
     plt.axis("off")
+    plt.tight_layout()
     plt.show()
 
 
 def analyze_roi_statistics(dataset_path):
+    """Analyze per-object ROI brightness/contrast and within-image deltas."""
+
     xml_paths = (dataset_path / "ANNOTATIONS").glob("*.xml")
 
     image_map = {
@@ -555,7 +589,12 @@ def analyze_roi_statistics(dataset_path):
     roi_contrast_delta_by_class = defaultdict(list)
 
     for xml_path in xml_paths:
-        image_path = image_map[xml_path.stem]
+        image_path = image_map.get(xml_path.stem)
+
+        if image_path is None:
+            raise FileNotFoundError(
+                f"No matching image for annotation: {xml_path}"
+            )
 
         gray_image = cv2.imread(
             str(image_path),
@@ -565,7 +604,7 @@ def analyze_roi_statistics(dataset_path):
         if gray_image is None:
             raise ValueError(f"Failed to read image: {image_path}")
 
-        # 一张图只计算一次
+        # Compute whole-image statistics once per image
         whole_brightness = gray_image.mean()
         whole_contrast = gray_image.std()
 
@@ -582,13 +621,13 @@ def analyze_roi_statistics(dataset_path):
             xmax = int(bbox.find("xmax").text)
             ymax = int(bbox.find("ymax").text)
 
-            # VOC 1-based inclusive → NumPy slicing
+            # VOC 1-based inclusive -> NumPy 0-based slicing
             roi = gray_image[
                 ymin - 1:ymax,
                 xmin - 1:xmax
             ]
 
-            # 一个 ROI 也只计算一次
+            # Compute each ROI statistic once
             roi_brightness = roi.mean()
             roi_contrast = roi.std()
 
@@ -657,11 +696,16 @@ def analyze_roi_statistics(dataset_path):
         roi_contrast_delta_by_class
     )
 
+
 def plot_roi_delta_distribution(
     roi_brightness_delta_by_class,
     roi_contrast_delta_by_class,
     metric_name
 ):
+    """Plot ROI-minus-whole-image brightness or contrast delta distributions."""
+
+    plt.figure(figsize=(10, 6))
+
     if metric_name == "brightness":
         values_by_class = roi_brightness_delta_by_class
         ylabel = "ROI - whole image brightness"
@@ -697,6 +741,9 @@ def plot_roi_delta_distribution(
     plt.title(title)
 
     plt.xticks(rotation=30)
+    plt.tight_layout()
     plt.show()
+
+
 if __name__ == "__main__":
     main()
