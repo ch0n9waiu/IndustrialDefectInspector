@@ -5,3 +5,5 @@ outputs/
 .idea/
 # Local private project context
 PROJECT_CONTEXT.md
+__pycache__/
+*.py[cod]
